@@ -1,0 +1,9 @@
+com\wenxt\emailautomation\model\Person.class
+com\wenxt\emailautomation\service\GoogleSheetsService.class
+com\wenxt\emailautomation\controller\EmailController.class
+com\wenxt\emailautomation\service\EmailService.class
+com\wenxt\emailautomation\config\CorsConfig.class
+com\wenxt\emailautomation\model\ApiResponse.class
+com\wenxt\emailautomation\model\EmailRequest.class
+com\wenxt\emailautomation\config\CorsConfig$1.class
+com\wenxt\emailautomation\EmailAutomationApplication.class
