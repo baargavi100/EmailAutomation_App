@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Email Automation — WENXT Technologies</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Toast Notifications ──────────────────────────────────────────────── -->
+<div id="statusBar"></div>
+
+<div class="page-wrapper">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="header-logo">
+      <span class="icon">✉️</span>
+      <h1>Smart Email Automation <span class="badge">AI-Powered</span></h1>
+    </div>
+    <p class="subtitle">WENXT Technologies &nbsp;·&nbsp; Groq LLaMA 3.3 70B &nbsp;·&nbsp; Gmail &amp; Outlook &nbsp;·&nbsp; Google Sheets Tracking</p>
+  </header>
+
+  <!-- ── Stats Cards ─────────────────────────────────────────────────────── -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card total">
+      <div class="stat-icon">📋</div>
+      <div class="stat-label">Total Emails</div>
+      <div class="stat-value" id="statTotal">—</div>
+    </div>
+    <div class="stat-card queue">
+      <div class="stat-icon">⏳</div>
+      <div class="stat-label">In Queue</div>
+      <div class="stat-value" id="statQueue">—</div>
+    </div>
+    <div class="stat-card sent">
+      <div class="stat-icon">📤</div>
+      <div class="stat-label">Sent</div>
+      <div class="stat-value" id="statSent">—</div>
+    </div>
+    <div class="stat-card viewed">
+      <div class="stat-icon">👁️</div>
+      <div class="stat-label">Viewed</div>
+      <div class="stat-value" id="statViewed">—</div>
+    </div>
+  </div>
+
+  <!-- ── Top Grid: Search + Send Form ────────────────────────────────────── -->
+  <div class="top-grid">
+
+    <!-- Search Card -->
+    <div class="card">
+      <div class="card-title"><span>🔍</span> Search Contact</div>
+
+      <div class="form-group">
+        <label for="searchInput">Name or Email</label>
+        <div class="search-wrapper">
+          <input type="text" id="searchInput" placeholder="e.g. Baargavi or hello@company.com" autocomplete="off" />
+          <button class="btn btn-primary" onclick="searchPerson()" id="searchBtn">
+            Search
+          </button>
+        </div>
+        <div class="search-hint">
+          Type a <span class="chip">name</span> or an email with <span class="chip">@</span> — system auto-detects
+        </div>
+      </div>
+
+      <div id="searchResults"></div>
+    </div>
+
+    <!-- Send Email Card -->
+    <div class="card">
+      <div class="card-title"><span>🚀</span> Send Email</div>
+
+      <div class="form-group">
+        <label for="sendName">Recipient Name</label>
+        <input type="text" id="sendName" placeholder="e.g. Baargavi Rajesh" />
+      </div>
+
+      <div class="form-group">
+        <label for="sendEmail">Recipient Email</label>
+        <input type="email" id="sendEmail" placeholder="e.g. baargavirajesh@gmail.com" />
+      </div>
+
+      <div class="form-group">
+        <label>Email Provider</label>
+        <div class="provider-group">
+          <div class="provider-option">
+            <input type="radio" name="provider" id="provGmail" value="Gmail" checked />
+            <label for="provGmail">📧 Gmail</label>
+          </div>
+          <div class="provider-option">
+            <input type="radio" name="provider" id="provOutlook" value="Outlook" />
+            <label for="provOutlook">📨 Outlook</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="sendMessage">Short Message <small style="color:var(--text-muted);font-weight:400">(AI will expand)</small></label>
+        <textarea id="sendMessage" placeholder="e.g. happy birthday, meeting tomorrow at 3pm, thank you for your help..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Schedule</label>
+        <div class="schedule-group">
+          <div class="sched-option">
+            <input type="radio" name="schedule" id="sched0" value="0" checked />
+            <label for="sched0">⚡ Now</label>
+          </div>
+          <div class="sched-option">
+            <input type="radio" name="schedule" id="sched180" value="180" />
+            <label for="sched180">⏱ 3 min</label>
+          </div>
+          <div class="sched-option">
+            <input type="radio" name="schedule" id="sched3600" value="3600" />
+            <label for="sched3600">⏰ 1 hour</label>
+          </div>
+          <div class="sched-option">
+            <input type="radio" name="schedule" id="sched86400" value="86400" />
+            <label for="sched86400">📅 24 hours</label>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-full" onclick="sendEmail()" id="sendBtn">
+        ✈️ &nbsp; Send Email via AI
+      </button>
+    </div>
+
+  </div><!-- end top-grid -->
+
+  <!-- ── Logs Section ──────────────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="logs-header">
+      <h3><span>📊</span> Email Logs — Google Sheets</h3>
+      <div class="logs-controls">
+        <div class="auto-refresh-badge">
+          <span class="dot"></span> Auto-refresh 30s
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="loadLogs()" id="refreshBtn">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="table-wrapper">
+      <table id="logsTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Provider</th>
+            <th>Message</th>
+            <th>Schedule</th>
+            <th>Status</th>
+            <th>Sent Time</th>
+          </tr>
+        </thead>
+        <tbody id="logsBody">
+          <tr>
+            <td colspan="8">
+              <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>Loading email logs...</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- end page-wrapper -->
+
+<!-- ── Footer ────────────────────────────────────────────────────────────── -->
+<footer>
+  <p>Built by <strong>Baargavi Rajesh</strong> &nbsp;·&nbsp; <strong>WENXT Technologies</strong> &nbsp;·&nbsp; GenLab Agentic AI Portfolio &nbsp;·&nbsp; March 2026</p>
+  <p style="margin-top:4px">Directed by <strong>MD Sir &amp; Bala Sir</strong></p>
+</footer>
+
+<script src="app.js"></script>
+
+</body>
+</html>
