@@ -7,8 +7,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
-
 @Service
 public class EmailService {
 
@@ -35,9 +33,13 @@ public class EmailService {
                     .bodyToMono(String.class)
                     .onErrorResume(e -> Mono.just("ERROR: " + e.getMessage()))
                     .block();
-            return response != null ? response : "No response from n8n";
+
+            if (response == null || response.isBlank()) {
+                return "ERROR: Empty response from n8n. Check webhook workflow and email node configuration.";
+            }
+            return response;
         } catch (Exception e) {
-            return "Failed to call n8n webhook: " + e.getMessage();
+            return "ERROR: Failed to call n8n webhook: " + e.getMessage();
         }
     }
 

@@ -1,12 +1,18 @@
 package com.wenxt.emailautomation.controller;
 
 import com.wenxt.emailautomation.model.ApiResponse;
+import com.wenxt.emailautomation.model.AuthRequest;
+import com.wenxt.emailautomation.model.AuthResponse;
 import com.wenxt.emailautomation.model.EmailRequest;
 import com.wenxt.emailautomation.model.Person;
+import com.wenxt.emailautomation.model.UserSession;
+import com.wenxt.emailautomation.service.AuthService;
 import com.wenxt.emailautomation.service.EmailService;
-import com.wenxt.emailautomation.service.GoogleSheetsService;
+import com.wenxt.emailautomation.service.PersonDirectoryService;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -14,120 +20,213 @@ import java.util.Map;
 @RequestMapping("/api")
 public class EmailController {
 
-    private final EmailService emailService;
-    private final GoogleSheetsService sheetsService;
+    private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_OPERATOR = "OPERATOR";
 
-    public EmailController(EmailService emailService, GoogleSheetsService sheetsService) {
+    private final EmailService emailService;
+    private final PersonDirectoryService directoryService;
+    private final AuthService authService;
+
+    public EmailController(EmailService emailService, PersonDirectoryService directoryService,
+            AuthService authService) {
         this.emailService = emailService;
-        this.sheetsService = sheetsService;
+        this.directoryService = directoryService;
+        this.authService = authService;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/health
-    // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/health")
     public ApiResponse<String> health() {
-        return ApiResponse.ok("Spring Boot is running — WENXT Email Automation", "OK");
+        return ApiResponse.ok("Backend is healthy", "OK");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/search?query=xxx
-    // Detects @ for email search, otherwise searches by name
-    // ─────────────────────────────────────────────────────────────────────────
+    @PostMapping("/auth/login")
+    public ApiResponse<AuthResponse> login(@RequestBody AuthRequest request) {
+        AuthResponse response = authService.login(request);
+        if (response == null) {
+            return ApiResponse.error("Invalid username or password");
+        }
+        return ApiResponse.ok("Login successful", response);
+    }
+
+    @PostMapping("/auth/logout")
+    public ApiResponse<String> logout(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        UserSession session = requireSession(token);
+        if (session == null) {
+            return ApiResponse.error("Unauthorized");
+        }
+        authService.logout(token);
+        return ApiResponse.ok("Logged out", "OK");
+    }
+
+    @GetMapping("/auth/me")
+    public ApiResponse<UserSession> me(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        UserSession session = requireSession(token);
+        if (session == null) {
+            return ApiResponse.error("Unauthorized");
+        }
+        return ApiResponse.ok("Session active", session);
+    }
+
+    @GetMapping("/persons")
+    public ApiResponse<List<Person>> persons(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
+        }
+        return ApiResponse.ok("Fetched persons", directoryService.getAllPersons());
+    }
+
     @GetMapping("/search")
-    public ApiResponse<List<Person>> search(@RequestParam(value = "query", defaultValue = "") String query) {
-        try {
-            List<Person> results = sheetsService.searchPersons(query.trim());
-            if (results.isEmpty()) {
-                return ApiResponse.error("No person found for: " + query);
-            }
-            return ApiResponse.ok("Found " + results.size() + " result(s)", results);
-        } catch (Exception e) {
-            return ApiResponse.error("Search failed: " + e.getMessage());
+    public ApiResponse<List<Person>> search(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestParam(value = "query", defaultValue = "") String query) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
         }
+        List<Person> results = directoryService.searchPersons(query);
+        if (results.isEmpty()) {
+            return ApiResponse.error("No person found for: " + query);
+        }
+        return ApiResponse.ok("Found " + results.size() + " result(s)", results);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/send
-    // Trigger n8n webhook to send email (n8n auto-adds person if not found)
-    // ─────────────────────────────────────────────────────────────────────────
+    @PostMapping("/persons")
+    public ApiResponse<Person> createPerson(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestBody Person person) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
+        }
+        if (person.getEmail() == null || person.getEmail().isBlank()) {
+            return ApiResponse.error("Email is required");
+        }
+        Person saved = directoryService.createPerson(person);
+        return ApiResponse.ok("Person saved", saved);
+    }
+
+    @PutMapping("/persons/{email}")
+    public ApiResponse<Person> updatePerson(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @PathVariable("email") String email,
+            @RequestBody Person person) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
+        }
+
+        Person updated = directoryService.updatePerson(email, person);
+        if (updated == null) {
+            return ApiResponse.error("Person not found");
+        }
+        return ApiResponse.ok("Person updated", updated);
+    }
+
+    @DeleteMapping("/persons/{email}")
+    public ApiResponse<String> deletePerson(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @PathVariable("email") String email) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN)) {
+            return ApiResponse.error("Forbidden: admin role required");
+        }
+
+        boolean deleted = directoryService.deletePerson(email);
+        if (!deleted) {
+            return ApiResponse.error("Person not found");
+        }
+        return ApiResponse.ok("Person deleted", email);
+    }
+
     @PostMapping("/send")
-    public ApiResponse<String> send(@RequestBody EmailRequest request) {
-        try {
-            if (request.getEmail() == null || request.getEmail().isBlank()) {
-                return ApiResponse.error("Email is required");
-            }
-            if (request.getMessage() == null || request.getMessage().isBlank()) {
-                return ApiResponse.error("Message is required");
-            }
-            String result = emailService.sendEmail(request);
-            return ApiResponse.ok("Email request sent to n8n", result);
-        } catch (Exception e) {
-            return ApiResponse.error("Send failed: " + e.getMessage());
+    public ApiResponse<String> send(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestBody EmailRequest request) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
         }
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            return ApiResponse.error("Email is required");
+        }
+        if (request.getMessage() == null || request.getMessage().isBlank()) {
+            return ApiResponse.error("Message is required");
+        }
+
+        String result = emailService.sendEmail(request);
+        boolean failed = isFailedSendResult(result);
+        directoryService.recordSend(request, Instant.now().toString(), failed ? "Failed" : "Sent");
+        if (failed) {
+            return ApiResponse.error(result);
+        }
+        return ApiResponse.ok("Email request sent", result);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/add
-    // Add a new person directly to Google Sheets
-    // ─────────────────────────────────────────────────────────────────────────
-    @PostMapping("/add")
-    public ApiResponse<String> add(@RequestBody Person person) {
-        try {
-            if (person.getEmail() == null || person.getEmail().isBlank()) {
-                return ApiResponse.error("Email is required");
-            }
-            sheetsService.addPerson(person);
-            return ApiResponse.ok("Person added to Google Sheets", person.getEmail());
-        } catch (Exception e) {
-            return ApiResponse.error("Add failed: " + e.getMessage());
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/add-and-send
-    // Add person to sheet AND send email via n8n in one call
-    // ─────────────────────────────────────────────────────────────────────────
     @PostMapping("/add-and-send")
-    public ApiResponse<String> addAndSend(@RequestBody EmailRequest request) {
-        try {
-            if (request.getEmail() == null || request.getEmail().isBlank()) {
-                return ApiResponse.error("Email is required");
-            }
-            // n8n workflow automatically handles adding if person not found
-            String result = emailService.addAndSend(request);
-            return ApiResponse.ok("Person added and email sent via n8n", result);
-        } catch (Exception e) {
-            return ApiResponse.error("Add-and-send failed: " + e.getMessage());
+    public ApiResponse<String> addAndSend(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestBody EmailRequest request) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
         }
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            return ApiResponse.error("Email is required");
+        }
+        if (request.getMessage() == null || request.getMessage().isBlank()) {
+            return ApiResponse.error("Message is required");
+        }
+
+        directoryService.createPerson(PersonDirectoryService.fromRequest(request, "Queue"));
+        String result = emailService.addAndSend(request);
+        boolean failed = isFailedSendResult(result);
+        directoryService.recordSend(request, Instant.now().toString(), failed ? "Failed" : "Sent");
+        if (failed) {
+            return ApiResponse.error(result);
+        }
+        return ApiResponse.ok("Person added and email sent", result);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/logs
-    // Return all email records from Google Sheets
-    // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/logs")
-    public ApiResponse<List<Person>> logs() {
-        try {
-            List<Person> all = sheetsService.getAllPersons();
-            return ApiResponse.ok("Fetched " + all.size() + " record(s)", all);
-        } catch (Exception e) {
-            return ApiResponse.error("Could not fetch logs: " + e.getMessage());
+    public ApiResponse<List<Person>> logs(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
         }
+        return ApiResponse.ok("Fetched " + directoryService.getAllPersons().size() + " record(s)",
+                directoryService.getAllPersons());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/stats
-    // Return count of Queue / Sent / Viewed
-    // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/stats")
-    public ApiResponse<Map<String, Long>> stats() {
-        try {
-            Map<String, Long> stats = sheetsService.getStats();
-            return ApiResponse.ok("Stats fetched", stats);
-        } catch (Exception e) {
-            return ApiResponse.error("Could not fetch stats: " + e.getMessage());
+    public ApiResponse<Map<String, Long>> stats(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN, ROLE_OPERATOR)) {
+            return ApiResponse.error("Unauthorized");
         }
+        return ApiResponse.ok("Stats fetched", directoryService.getStats());
     }
 
+    @GetMapping(value = "/export/csv", produces = "text/csv")
+    public String exportCsv(@RequestHeader(value = "X-Auth-Token", required = false) String token) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN)) {
+            return "error\nUnauthorized\n";
+        }
+        return directoryService.exportCsv();
+    }
+
+    @PostMapping(value = "/import/csv", consumes = { MediaType.TEXT_PLAIN_VALUE, "text/csv" })
+    public ApiResponse<Map<String, Integer>> importCsv(
+            @RequestHeader(value = "X-Auth-Token", required = false) String token,
+            @RequestBody String csvBody) {
+        if (!authService.hasAnyRole(token, ROLE_ADMIN)) {
+            return ApiResponse.error("Forbidden: admin role required");
+        }
+        return ApiResponse.ok("CSV import complete", directoryService.importCsv(csvBody));
+    }
+
+    private UserSession requireSession(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        return authService.getSession(token);
+    }
+
+    private boolean isFailedSendResult(String result) {
+        if (result == null) {
+            return true;
+        }
+        return result.startsWith("ERROR");
+    }
 }

@@ -1,285 +1,213 @@
-/**
- * Smart Email Automation — WENXT Technologies
- * app.js — Frontend Logic
- *
- * Developer: Baargavi Rajesh | March 2026
- */
-
 'use strict';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION — Update API_BASE when deploying backend to Railway
-// ─────────────────────────────────────────────────────────────────────────────
 const API_BASE = 'http://localhost:8080/api';
-
-// Auto-refresh interval (milliseconds)
 const AUTO_REFRESH_MS = 30000;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TOAST NOTIFICATIONS
-// ─────────────────────────────────────────────────────────────────────────────
-function showToast(message, type = 'info') {
-  const bar = document.getElementById('statusBar');
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.textContent = message;
-  bar.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+let authToken = localStorage.getItem('authToken') || '';
+let currentUser = null;
+let selectedEmail = '';
+
+const $ = (id) => document.getElementById(id);
+
+/* ═══════════════════════════════════════════
+   TOAST SYSTEM
+   ═══════════════════════════════════════════ */
+
+function toast(message, type = 'info') {
+  const bar = $('statusBar');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = message;
+
+  const progress = document.createElement('div');
+  progress.className = 'toast-progress';
+  el.appendChild(progress);
+
+  bar.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(20px)';
+    el.style.transition = 'opacity 200ms, transform 200ms';
+    setTimeout(() => el.remove(), 200);
+  }, 4000);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEARCH CONTACT
-// Detects @ symbol to decide email vs name search
-// ─────────────────────────────────────────────────────────────────────────────
-async function searchPerson() {
-  const input   = document.getElementById('searchInput');
-  const btn     = document.getElementById('searchBtn');
-  const query   = input.value.trim();
-  const results = document.getElementById('searchResults');
 
-  if (!query) {
-    showToast('Please enter a name or email to search.', 'error');
+/* ═══════════════════════════════════════════
+   API HELPER
+   ═══════════════════════════════════════════ */
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  if (authToken) headers['X-Auth-Token'] = authToken;
+  const res = await fetch(`${API_BASE}${path}`, Object.assign({}, opts, { headers }));
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return await res.json();
+  }
+  return await res.text();
+}
+
+
+/* ═══════════════════════════════════════════
+   AUTH
+   ═══════════════════════════════════════════ */
+
+function setLoggedIn(user) {
+  currentUser = user;
+  $('loginView').classList.add('hidden');
+  $('appShell').classList.remove('hidden');
+
+  $('userName').textContent = user.username || '—';
+  $('userRole').textContent = user.role || '—';
+  $('userAvatar').textContent = (user.username || 'U')[0].toUpperCase();
+
+  const isAdmin = user.role === 'ADMIN';
+  $('deletePersonBtn').disabled = !isAdmin;
+  $('downloadCsvBtn').disabled = !isAdmin;
+  $('uploadCsvBtn').disabled = !isAdmin;
+}
+
+function setLoggedOut() {
+  authToken = '';
+  currentUser = null;
+  selectedEmail = '';
+  localStorage.removeItem('authToken');
+  $('loginView').classList.remove('hidden');
+  $('appShell').classList.add('hidden');
+}
+
+async function login() {
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  if (!username || !password) {
+    toast('Username and password are required', 'error');
     return;
   }
 
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Searching...';
-  results.style.display = 'none';
-  results.innerHTML = '';
-
   try {
-    const res  = await fetch(`${API_BASE}/search?query=${encodeURIComponent(query)}`);
-    const data = await res.json();
-
-    if (!data.success || !data.data || data.data.length === 0) {
-      results.style.display = 'block';
-      results.innerHTML = `
-        <div class="empty-state" style="padding:20px 0">
-          <div class="empty-icon">🔍</div>
-          <p>No contact found for "<strong>${escapeHtml(query)}</strong>".<br/>
-          <small style="color:var(--text-muted)">You can still fill the form below and send — they'll be auto-added.</small></p>
-        </div>`;
-      // Pre-fill email if query looks like an email
-      if (query.includes('@')) {
-        document.getElementById('sendEmail').value = query;
-      }
-      return;
-    }
-
-    results.style.display = 'block';
-
-    const persons = data.data;
-    const html = persons.map(p => `
-      <div class="person-card" onclick="fillForm(${JSON.stringify(p).split('"').join('&quot;')})">
-        <div class="person-info">
-          <div class="name">${escapeHtml(p.name || '')}
-            <span class="provider-tag ${p.provider === 'Gmail' ? 'provider-gmail' : 'provider-outlook'}">
-              ${escapeHtml(p.provider || '')}
-            </span>
-          </div>
-          <div class="email-addr">${escapeHtml(p.email || '')}</div>
-        </div>
-        <span style="color:var(--text-muted);font-size:0.8rem">Click to use →</span>
-      </div>
-    `).join('');
-
-    results.innerHTML = html;
-    showToast(`Found ${persons.length} contact(s)`, 'success');
-
-  } catch (err) {
-    results.style.display = 'block';
-    results.innerHTML = `<div class="empty-state" style="padding:16px 0"><p style="color:var(--error)">⚠️ Could not reach backend. Make sure Spring Boot is running on port 8080.</p></div>`;
-    showToast('Backend unreachable — is Spring Boot running?', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Search';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FILL SEND FORM FROM SELECTED PERSON
-// ─────────────────────────────────────────────────────────────────────────────
-function fillForm(person) {
-  document.getElementById('sendName').value  = person.name  || '';
-  document.getElementById('sendEmail').value = person.email || '';
-
-  // Set provider radio
-  const provider = (person.provider || 'Gmail').toLowerCase();
-  const radio = document.querySelector(`input[name="provider"][value="${provider === 'outlook' ? 'Outlook' : 'Gmail'}"]`);
-  if (radio) radio.checked = true;
-
-  // Clear message so user types fresh
-  document.getElementById('sendMessage').value = '';
-
-  // Scroll to send form
-  document.getElementById('sendName').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  document.getElementById('sendMessage').focus();
-  showToast(`"${person.name}" loaded into the send form`, 'success');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SEND EMAIL
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendEmail() {
-  const name     = document.getElementById('sendName').value.trim();
-  const email    = document.getElementById('sendEmail').value.trim();
-  const message  = document.getElementById('sendMessage').value.trim();
-  const provider = document.querySelector('input[name="provider"]:checked')?.value || 'Gmail';
-  const schedule = document.querySelector('input[name="schedule"]:checked')?.value  || '0';
-  const btn      = document.getElementById('sendBtn');
-
-  // Validation
-  if (!email) { showToast('Recipient email is required.', 'error'); return; }
-  if (!message) { showToast('Please enter a short message.', 'error'); return; }
-  if (!validateEmail(email)) { showToast('Please enter a valid email address.', 'error'); return; }
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> &nbsp; Sending...';
-
-  const payload = { name, email, provider, message, schedule };
-
-  try {
-    const res  = await fetch(`${API_BASE}/send`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload)
+    const data = await api('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
 
-    if (data.success) {
-      const scheduleLabel = scheduleText(schedule);
-      showToast(`✅ Email sent successfully${scheduleLabel ? ' — ' + scheduleLabel : ''}`, 'success');
-      document.getElementById('sendMessage').value = '';
-      // Refresh logs/stats after a short delay
-      setTimeout(() => { loadLogs(); loadStats(); }, 2000);
-    } else {
-      showToast(`❌ Send failed: ${data.message}`, 'error');
-    }
-
-  } catch (err) {
-    showToast('Backend unreachable — is Spring Boot running?', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '✈️ &nbsp; Send Email via AI';
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LOAD STATS
-// ─────────────────────────────────────────────────────────────────────────────
-async function loadStats() {
-  try {
-    const res  = await fetch(`${API_BASE}/stats`);
-    const data = await res.json();
-
-    if (data.success && data.data) {
-      const s = data.data;
-      setStatValue('statTotal',  s.total  ?? '—');
-      setStatValue('statQueue',  s.queue  ?? '—');
-      setStatValue('statSent',   s.sent   ?? '—');
-      setStatValue('statViewed', s.viewed ?? '—');
-    }
-  } catch {
-    // Silent — stats cards stay at '—' when backend is offline
-    ['statTotal','statQueue','statSent','statViewed'].forEach(id => setStatValue(id, '—'));
-  }
-}
-
-function setStatValue(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LOAD LOGS TABLE
-// ─────────────────────────────────────────────────────────────────────────────
-async function loadLogs() {
-  const btn  = document.getElementById('refreshBtn');
-  const body = document.getElementById('logsBody');
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
-
-  try {
-    const res  = await fetch(`${API_BASE}/logs`);
-    const data = await res.json();
-
-    if (!data.success || !data.data || data.data.length === 0) {
-      body.innerHTML = `
-        <tr><td colspan="8">
-          <div class="empty-state">
-            <div class="empty-icon">📭</div>
-            <p>No email records yet. Send your first email above!</p>
-          </div>
-        </td></tr>`;
+    if (!data.success) {
+      toast(data.message || 'Login failed', 'error');
       return;
     }
 
-    const rows = data.data;
-    body.innerHTML = rows.map((p, i) => `
-      <tr>
-        <td>${i + 1}</td>
-        <td>${escapeHtml(p.name  || '—')}</td>
-        <td>${escapeHtml(p.email || '—')}</td>
-        <td>
-          <span class="provider-tag ${(p.provider || '').toLowerCase() === 'gmail' ? 'provider-gmail' : 'provider-outlook'}">
-            ${escapeHtml(p.provider || '—')}
-          </span>
-        </td>
-        <td class="message-cell" title="${escapeHtml(p.message || '')}">${escapeHtml(truncate(p.message, 40))}</td>
-        <td>${scheduleText(p.schedule || '0')}</td>
-        <td>${statusBadge(p.status || '')}</td>
-        <td>${formatTime(p.sentTime)}</td>
-      </tr>
-    `).join('');
-
-  } catch {
-    body.innerHTML = `
-      <tr><td colspan="8">
-        <div class="empty-state">
-          <p style="color:var(--error)">⚠️ Could not load logs. Backend may be offline.</p>
-        </div>
-      </td></tr>`;
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '🔄 Refresh';
+    authToken = data.data.token;
+    localStorage.setItem('authToken', authToken);
+    setLoggedIn(data.data);
+    toast('Welcome back', 'success');
+    await refreshAll();
+  } catch (e) {
+    // API offline — load demo state
+    loadDemoData();
+    toast('Running in demo mode (API offline)', 'info');
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-function statusBadge(status) {
-  if (!status) return `<span class="badge-status badge-unknown">—</span>`;
-  if (status.includes('Queue'))  return `<span class="badge-status badge-queue">${escapeHtml(status)}</span>`;
-  if (status.includes('Sent'))   return `<span class="badge-status badge-sent">${escapeHtml(status)}</span>`;
-  if (status.includes('Viewed')) return `<span class="badge-status badge-viewed">${escapeHtml(status)}</span>`;
-  return `<span class="badge-status badge-unknown">${escapeHtml(status)}</span>`;
-}
-
-function scheduleText(val) {
-  const map = { '0': 'Now', '180': '3 min', '3600': '1 hour', '86400': '24 hours' };
-  return map[String(val)] || (val ? val + 's' : 'Now');
-}
-
-function formatTime(iso) {
-  if (!iso) return '—';
+async function logout() {
   try {
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    return d.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  } catch { return iso; }
+    await api('/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  setLoggedOut();
+  toast('Signed out', 'info');
 }
 
-function truncate(str, max) {
-  if (!str) return '';
-  return str.length > max ? str.substring(0, max) + '…' : str;
+async function bootstrapSession() {
+  if (!authToken) return;
+  try {
+    const data = await api('/auth/me');
+    if (!data.success) {
+      setLoggedOut();
+      return;
+    }
+    setLoggedIn(data.data);
+    await refreshAll();
+  } catch (_) {
+    setLoggedOut();
+  }
 }
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
+
+/* ═══════════════════════════════════════════
+   DEMO DATA FALLBACK
+   ═══════════════════════════════════════════ */
+
+function loadDemoData() {
+  const demoUser = { username: 'admin', role: 'ADMIN', token: 'demo' };
+  authToken = 'demo';
+  localStorage.setItem('authToken', authToken);
+  setLoggedIn(demoUser);
+
+  // Populate stats with demo values
+  animateCount($('statTotal'), 24502);
+  animateCount($('statQueue'), 128);
+  animateCount($('statViewed'), 18240);
+  animateCount($('statFailed'), 3);
+
+  // Populate demo table rows
+  const demoRows = [
+    { name: 'Alex Rivera', email: 'alex.r@wenxt.tech', provider: 'Gmail', status: 'Sent', sentTime: 'Mar 16, 10:30 AM' },
+    { name: 'Sarah Chen', email: 'sarah@studio.io', provider: 'Outlook', status: 'Queue', sentTime: 'Mar 16, 02:00 PM' },
+    { name: 'Mike Johnson', email: 'mjones@global.com', provider: 'Gmail', status: 'Viewed', sentTime: 'Mar 15, 09:15 AM' },
+    { name: 'Anna White', email: 'aw@tech-corp.com', provider: 'Gmail', status: 'Sent', sentTime: 'Mar 15, 02:00 PM' },
+    { name: 'Jordan Smith', email: 'j.smith@corp.com', provider: 'Outlook', status: 'Viewed', sentTime: 'Mar 14, 11:20 AM' },
+  ];
+  renderRows(demoRows, $('dashboardLogsBody'));
+  renderRows(demoRows, $('logsBody'));
+}
+
+
+/* ═══════════════════════════════════════════
+   NUMBER COUNT-UP ANIMATION
+   ═══════════════════════════════════════════ */
+
+function animateCount(el, target) {
+  const duration = 600;
+  const start = performance.now();
+  const from = 0;
+
+  function tick(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    // ease-out cubic
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(from + (target - from) * ease);
+    el.textContent = current.toLocaleString();
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+
+/* ═══════════════════════════════════════════
+   STATS
+   ═══════════════════════════════════════════ */
+
+async function refreshStats() {
+  try {
+    const data = await api('/stats');
+    if (!data.success || !data.data) return;
+    animateCount($('statTotal'), data.data.total ?? 0);
+    animateCount($('statQueue'), data.data.queue ?? 0);
+    animateCount($('statViewed'), data.data.viewed ?? 0);
+    animateCount($('statFailed'), data.data.failed ?? 0);
+  } catch (_) {
+    // stats unavailable — keep current values
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   TABLE RENDERING
+   ═══════════════════════════════════════════ */
+
+function esc(str) {
+  return String(str || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -287,25 +215,368 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function validateEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+function statusBadgeClass(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'queue') return 'badge--queue';
+  if (s === 'sent') return 'badge--sent';
+  if (s === 'viewed') return 'badge--viewed';
+  if (s === 'failed') return 'badge--failed';
+  return '';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KEYBOARD: Press Enter in search box
-// ─────────────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('searchInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') searchPerson();
+function providerDotClass(provider) {
+  const p = (provider || '').toLowerCase();
+  if (p === 'gmail') return 'provider-dot--gmail';
+  if (p === 'outlook') return 'provider-dot--outlook';
+  return '';
+}
+
+function renderRows(rows, targetBody) {
+  const body = targetBody || $('logsBody');
+  if (!rows || rows.length === 0) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#A1A1AA;padding:24px;">No records found</td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map((p) => {
+    const email = esc(p.email || '');
+    const providerLower = (p.provider || '').toLowerCase();
+    const statusLower = (p.status || '').toLowerCase();
+    return `<tr data-email="${email}">
+      <td><span style="font-weight:500">${esc(p.name || '')}</span></td>
+      <td style="color:#71717A">${email}</td>
+      <td><span class="provider-cell"><span class="provider-dot ${providerDotClass(p.provider)}"></span>${esc(p.provider || '')}</span></td>
+      <td><span class="badge ${statusBadgeClass(p.status)}">${esc(p.status || '')}</span></td>
+      <td style="color:#71717A;font-size:12px">${esc(p.sentTime || '')}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr[data-email]').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const email = tr.getAttribute('data-email');
+      const row = rows.find((r) => (r.email || '').toLowerCase() === email.toLowerCase());
+      if (!row) return;
+      selectedEmail = row.email;
+      $('personName').value = row.name || '';
+      $('personEmail').value = row.email || '';
+      $('personProvider').value = row.provider || 'Gmail';
+      $('personMessage').value = row.message || '';
+      $('personSchedule').value = row.schedule || '0';
+      $('personStatus').value = row.status || 'Queue';
+      // Switch to contacts view
+      navigateTo('contacts');
+    });
+  });
+}
+
+
+/* ═══════════════════════════════════════════
+   LOGS
+   ═══════════════════════════════════════════ */
+
+async function refreshLogs() {
+  try {
+    const data = await api('/logs');
+    if (!data.success) {
+      toast(data.message || 'Failed to load logs', 'error');
+      return;
+    }
+    const rows = data.data || [];
+    renderRows(rows, $('dashboardLogsBody'));
+    renderRows(rows, $('logsBody'));
+  } catch (_) {
+    // logs unavailable
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   SEARCH
+   ═══════════════════════════════════════════ */
+
+async function search() {
+  const query = $('searchInput').value.trim();
+  const path = query ? `/search?query=${encodeURIComponent(query)}` : '/persons';
+  try {
+    const data = await api(path);
+    if (!data.success) {
+      renderRows([], $('logsBody'));
+      toast(data.message || 'No result', 'info');
+      return;
+    }
+    renderRows(data.data || [], $('logsBody'));
+  } catch (_) {
+    // search unavailable
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   COMPOSE / SEND
+   ═══════════════════════════════════════════ */
+
+function gatherComposePayload() {
+  return {
+    name: $('sendName').value.trim(),
+    email: $('sendEmail').value.trim(),
+    provider: $('sendProvider').value,
+    message: $('sendMessage').value.trim(),
+    schedule: $('sendSchedule').value
+  };
+}
+
+async function send(addAndSend = false) {
+  const payload = gatherComposePayload();
+  if (!payload.email || !payload.message) {
+    toast('Email and message are required', 'error');
+    return;
+  }
+  try {
+    const path = addAndSend ? '/add-and-send' : '/send';
+    const data = await api(path, { method: 'POST', body: JSON.stringify(payload) });
+    if (!data.success) {
+      toast(data.message || 'Send failed', 'error');
+      return;
+    }
+    toast(addAndSend ? 'Added and sent' : 'Sent successfully', 'success');
+    await refreshAll();
+  } catch (_) {
+    toast('Send failed — API offline', 'error');
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   CONTACTS CRUD
+   ═══════════════════════════════════════════ */
+
+function gatherPersonPayload() {
+  return {
+    name: $('personName').value.trim(),
+    email: $('personEmail').value.trim(),
+    provider: $('personProvider').value,
+    message: $('personMessage').value.trim(),
+    aiGenerated: 'false',
+    schedule: $('personSchedule').value,
+    status: $('personStatus').value,
+    sentTime: ''
+  };
+}
+
+async function savePerson() {
+  const payload = gatherPersonPayload();
+  if (!payload.email) {
+    toast('Email is required for contact', 'error');
+    return;
+  }
+
+  const isUpdate = !!selectedEmail;
+  const path = isUpdate ? `/persons/${encodeURIComponent(selectedEmail)}` : '/persons';
+  const method = isUpdate ? 'PUT' : 'POST';
+
+  try {
+    const data = await api(path, { method, body: JSON.stringify(payload) });
+    if (!data.success) {
+      toast(data.message || 'Save failed', 'error');
+      return;
+    }
+    selectedEmail = data.data?.email || payload.email;
+    toast(isUpdate ? 'Contact updated' : 'Contact created', 'success');
+    await refreshAll();
+  } catch (_) {
+    toast('Save failed — API offline', 'error');
+  }
+}
+
+async function deletePerson() {
+  const email = selectedEmail || $('personEmail').value.trim();
+  if (!email) {
+    toast('Select a contact first', 'error');
+    return;
+  }
+
+  try {
+    const data = await api(`/persons/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    if (!data.success) {
+      toast(data.message || 'Delete failed', 'error');
+      return;
+    }
+    clearPersonForm();
+    toast('Contact deleted', 'success');
+    await refreshAll();
+  } catch (_) {
+    toast('Delete failed — API offline', 'error');
+  }
+}
+
+function clearPersonForm() {
+  selectedEmail = '';
+  $('personName').value = '';
+  $('personEmail').value = '';
+  $('personProvider').value = 'Gmail';
+  $('personMessage').value = '';
+  $('personSchedule').value = '0';
+  $('personStatus').value = 'Queue';
+}
+
+
+/* ═══════════════════════════════════════════
+   CSV
+   ═══════════════════════════════════════════ */
+
+async function downloadCsv() {
+  try {
+    const text = await api('/export/csv', { headers: { 'Content-Type': 'text/plain' } });
+    if (typeof text !== 'string' || text.startsWith('error')) {
+      toast('Export failed (admin only)', 'error');
+      return;
+    }
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contacts-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('CSV downloaded', 'success');
+  } catch (_) {
+    toast('Export failed — API offline', 'error');
+  }
+}
+
+async function uploadCsv() {
+  const file = $('csvFile').files[0];
+  if (!file) {
+    toast('Choose a CSV file first', 'error');
+    return;
+  }
+  try {
+    const content = await file.text();
+    const data = await api('/import/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: content
+    });
+    if (!data.success) {
+      toast(data.message || 'Import failed', 'error');
+      return;
+    }
+    toast(`Imported ${data.data.imported}, skipped ${data.data.skipped}`, 'success');
+    await refreshAll();
+  } catch (_) {
+    toast('Import failed — API offline', 'error');
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   NAVIGATION
+   ═══════════════════════════════════════════ */
+
+const viewTitles = {
+  dashboard: 'Dashboard',
+  compose: 'Send Email',
+  contacts: 'Contacts',
+  csv: 'CSV Tools'
+};
+
+function navigateTo(viewName) {
+  // Update nav items
+  document.querySelectorAll('.nav-item').forEach((item) => {
+    item.classList.toggle('active', item.dataset.view === viewName);
   });
 
-  // Initial data load
-  loadStats();
-  loadLogs();
+  // Show correct view
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('active-view'));
+  const target = $('view-' + viewName);
+  if (target) target.classList.add('active-view');
 
-  // Auto-refresh every 30 seconds
+  // Update topbar
+  $('topbarTitle').textContent = viewTitles[viewName] || viewName;
+
+  // Close mobile sidebar
+  document.querySelector('.sidebar').classList.remove('open');
+}
+
+
+/* ═══════════════════════════════════════════
+   REFRESH
+   ═══════════════════════════════════════════ */
+
+async function refreshAll() {
+  await Promise.all([refreshStats(), refreshLogs()]);
+}
+
+
+/* ═══════════════════════════════════════════
+   SEGMENTED CONTROL
+   ═══════════════════════════════════════════ */
+
+function setupSegmentedControl() {
+  const segments = document.querySelectorAll('.segment');
+  segments.forEach((seg) => {
+    seg.addEventListener('click', () => {
+      segments.forEach((s) => s.classList.remove('active'));
+      seg.classList.add('active');
+      $('sendSchedule').value = seg.dataset.value;
+    });
+  });
+}
+
+
+/* ═══════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════ */
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Auth
+  $('loginBtn').addEventListener('click', login);
+  $('logoutBtn').addEventListener('click', logout);
+  $('refreshBtn').addEventListener('click', refreshAll);
+
+  // Allow Enter key on login
+  $('password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') login();
+  });
+  $('username').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('password').focus();
+  });
+
+  // Compose
+  $('sendBtn').addEventListener('click', () => send(false));
+  $('addAndSendBtn').addEventListener('click', () => send(true));
+
+  // Contacts
+  $('searchInput').addEventListener('input', search);
+  $('savePersonBtn').addEventListener('click', savePerson);
+  $('clearPersonBtn').addEventListener('click', clearPersonForm);
+  $('deletePersonBtn').addEventListener('click', deletePerson);
+
+  // CSV
+  $('downloadCsvBtn').addEventListener('click', downloadCsv);
+  $('uploadCsvBtn').addEventListener('click', uploadCsv);
+
+  // Navigation
+  document.querySelectorAll('.nav-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      navigateTo(item.dataset.view);
+    });
+  });
+
+  // Mobile menu
+  $('mobileMenuBtn').addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.toggle('open');
+  });
+
+  // Segmented control
+  setupSegmentedControl();
+
+  // Bootstrap
+  await bootstrapSession();
+
+  // Auto refresh
   setInterval(() => {
-    loadStats();
-    loadLogs();
+    if (authToken) refreshAll();
   }, AUTO_REFRESH_MS);
 });
