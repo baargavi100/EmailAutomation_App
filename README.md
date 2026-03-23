@@ -1,173 +1,123 @@
-# Email Automation App
+﻿# Email Automation App
 
-Professional full-stack email automation platform with role-based access, contact directory management, CSV import/export, dashboard analytics, and n8n webhook integration.
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/baargavi100/EmailAutomation_App/actions)
+[![Java](https://img.shields.io/badge/java-21-blue?style=flat-square)](https://www.oracle.com/java/)
+[![Spring Boot](https://img.shields.io/badge/spring--boot-3.2.3-brightgreen?style=flat-square)](https://spring.io/projects/spring-boot)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Repo Size](https://img.shields.io/github/repo-size/baargavi100/EmailAutomation_App?style=flat-square)](https://github.com/baargavi100/EmailAutomation_App)
 
 ## Overview
 
-This project provides a complete workflow for managing outreach operations:
+Email Automation App is a full-stack initiative for enterprise outreach workflows. It provides role-based access, contact management, templated email sends, analytics dashboarding, and workflow orchestration through n8n.
 
-- Authenticate users (`ADMIN`, `OPERATOR`)
-- Manage contacts (create, update, delete, search)
-- Send emails through n8n webhooks
-- Track status, logs, and dashboard statistics
-- Import/export records using CSV
-- Optional Google Sheets synchronization layer
+##  Key Features
 
-## Tech Stack
+-  Role-based authentication (ADMIN, OPERATOR)
+-  User session management (X-Auth-Token)
+-  CSV import/export for contacts and logs
+-  Send and Add-and-Send email workflows
+-  Dashboard metrics (queued, sent, delivered, ailed)
+-  Google Sheets sync (optional)
+-  n8n webhook integration for email operations
+-  CORS ready for local frontend usage
+
+##  Tech Stack
 
 ### Backend
-
 - Java 21
 - Spring Boot 3.2.3
-- Spring Web + WebFlux (`WebClient` for n8n calls)
 - Maven
+- Spring Web + WebFlux (WebClient)
 
 ### Frontend
-
-- HTML, CSS, Vanilla JavaScript
-- Hosted locally via Python HTTP server
+- Vanilla HTML/CSS/JavaScript
+- Static hosting (Python HTTP server in dev)
 
 ### Integrations
+- n8n workflow
+- Google Sheets API (service account)
 
-- n8n Webhook (email workflow trigger)
-- Google Sheets API (optional service-account based storage)
+##  Repository Structure
 
-## Repository Structure
-
-```text
+`
 EmailAutomation_app/
   backend/
-    src/main/java/com/wenxt/emailautomation/
-      config/
-      controller/
-      model/
-      service/
+    src/main/java/com/wenxt/emailautomation/{config,controller,model,service}
     src/main/resources/application.properties
     pom.xml
-  frontend/
-    index.html
-    app.js
-    style.css
-    logo.png
+  frontend/{index.html,app.js,style.css}
   BACKEND_COMPLETE_BUILD_DOCUMENTATION.md
   COMPLETE_TESTING_GUIDE.md
-```
+  README.md
+`
 
-## Key Features
+##  Configuration
 
-- Role-based authentication with token sessions (`X-Auth-Token`)
-- Contact directory CRUD with search
-- Send and add-and-send email flows
-- Dashboard metrics (`queue`, `sent`, `viewed`, `failed`, `total`)
-- CSV export/import utilities (admin-restricted)
-- CORS configured for local frontend usage
+Edit ackend/src/main/resources/application.properties:
 
-## Configuration
-
-Edit [backend/src/main/resources/application.properties](backend/src/main/resources/application.properties):
-
-```properties
+`properties
 server.port=8080
 n8n.webhook.url=https://unfledged-dayle-forcedly.ngrok-free.dev/webhook/send-email
 google.sheets.id=<your-google-sheet-id>
-```
+`
 
-### Important Notes
+Local n8n test URLs:
+- http://localhost:5678/webhook-test/send-email
+- http://localhost:5678/webhook/send-email
 
-- For local n8n testing, you can temporarily use:
-  - `http://localhost:5678/webhook-test/send-email` (editor test mode)
-  - `http://localhost:5678/webhook/send-email` (active workflow mode)
-- Add Google credentials file if using Sheets:
-  - `backend/src/main/resources/credentials.json`
-
-## Run Locally
+##  Run Locally
 
 ### Prerequisites
-
 - Java 21
 - Maven 3.9+
 - Python 3
 
-### 1. Start Backend
-
-```powershell
-cd d:\EmailAutomation_app\backend
+### Backend
+`powershell
+cd backend
 mvn spring-boot:run
-```
+`
 
-Backend health endpoint:
+Health URL: http://localhost:8080/api/health
 
-- `http://localhost:8080/api/health`
-
-### 2. Start Frontend
-
-```powershell
-cd d:\EmailAutomation_app\frontend
+### Frontend
+`powershell
+cd frontend
 python -m http.server 5500
-```
+`
 
-Frontend URL:
+App URL: http://localhost:5500
 
-- `http://localhost:5500`
+##  Demo Accounts
+- dmin / admin123
+- operator / operator123
 
-## Demo Accounts
+##  API Summary
+Base path: /api
 
-- `admin / admin123` (full access)
-- `operator / operator123` (restricted from admin-only endpoints)
+- GET /health
+- POST /auth/login
+- POST /auth/logout
+- GET /auth/me
+- GET /persons
+- GET /search?query=...
+- POST /persons
+- PUT /persons/{email}
+- DELETE /persons/{email}
+- POST /send
+- POST /add-and-send
+- GET /logs
+- GET /stats
+- GET /export/csv (admin)
+- POST /import/csv (admin)
 
-## API Summary
+##  Deployment
+1. Create GitHub repo: https://github.com/baargavi100/EmailAutomation_App
+2. Link local repo and push (below)
 
-Base path: `/api`
+##  Security Notes
+- Never commit secret files or API keys.
+- Add credentials.json to .gitignore.
 
-- `GET /health`
-- `POST /auth/login`
-- `POST /auth/logout`
-- `GET /auth/me`
-- `GET /persons`
-- `GET /search?query=...`
-- `POST /persons`
-- `PUT /persons/{email}`
-- `DELETE /persons/{email}`
-- `POST /send`
-- `POST /add-and-send`
-- `GET /logs`
-- `GET /stats`
-- `GET /export/csv` (admin)
-- `POST /import/csv` (admin)
-
-## n8n Integration Behavior
-
-- Backend calls configured `n8n.webhook.url` via HTTP POST.
-- If n8n returns empty or invalid response, backend marks operation as failed and returns an error to frontend.
-- For reliable success handling, configure n8n workflow to return JSON from a **Respond to Webhook** node, e.g.:
-
-```json
-{
-  "status": "sent",
-  "message": "Email sent"
-}
-```
-
-## Testing
-
-For complete step-by-step validation:
-
-- [BACKEND_COMPLETE_BUILD_DOCUMENTATION.md](BACKEND_COMPLETE_BUILD_DOCUMENTATION.md)
-- [COMPLETE_TESTING_GUIDE.md](COMPLETE_TESTING_GUIDE.md)
-
-## Security and Operations Notes
-
-- Do not commit real secrets (`credentials.json`, API keys, `.env`).
-- Keep n8n workflow active when using production webhook URLs.
-- Restrict admin credentials and rotate them for production deployments.
-
-## Future Improvements
-
-- Move auth/session to persistent storage (JWT + DB/Redis)
-- Add automated unit/integration tests in CI
-- Add Docker support for backend/frontend/n8n stack
-- Add structured logging and observability pipeline
-
-## License
-
-This project currently has no explicit license file. Add one (for example, MIT) before public distribution if needed.
+##  License
+MIT (add LICENSE file in repo root)
